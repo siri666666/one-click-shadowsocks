@@ -39,6 +39,12 @@ set -- install --port 12345; URL=https://raw.githubusercontent.com/siri666666/on
 set -- interactive; URL=https://raw.githubusercontent.com/siri666666/one-click-shadowsocks/main/install.sh; OUT=/tmp/ss-install.sh; dl(){ command -v wget >/dev/null 2>&1 && wget -O "$OUT" "$URL" && return 0; command -v curl >/dev/null 2>&1 && curl -fsSL -o "$OUT" "$URL" && return 0; command -v busybox >/dev/null 2>&1 && busybox wget --help >/dev/null 2>&1 && busybox wget -O "$OUT" "$URL" && return 0; return 1; }; deps(){ command -v apt-get >/dev/null 2>&1 && apt-get update && apt-get install -y ca-certificates wget && return 0; command -v dnf >/dev/null 2>&1 && dnf install -y ca-certificates wget && return 0; command -v microdnf >/dev/null 2>&1 && microdnf install -y ca-certificates wget && return 0; command -v yum >/dev/null 2>&1 && yum install -y ca-certificates wget && return 0; command -v apk >/dev/null 2>&1 && apk add --no-cache ca-certificates wget && return 0; command -v pacman >/dev/null 2>&1 && pacman -Sy --noconfirm ca-certificates wget && return 0; command -v zypper >/dev/null 2>&1 && zypper --non-interactive install ca-certificates wget && return 0; command -v tdnf >/dev/null 2>&1 && tdnf install -y ca-certificates wget && return 0; return 1; }; dl || { deps && dl; } || { echo "no downloader or supported package manager found" >&2; exit 1; }; sh "$OUT" "$@"
 ```
 
+修复已有安装，不改变端口、密码和加密方式：
+
+```sh
+wget -O install.sh https://raw.githubusercontent.com/siri666666/one-click-shadowsocks/main/install.sh && sh install.sh repair
+```
+
 如果机器已经有 `curl` 或 `wget`，也可以用短命令：
 
 ```sh
@@ -153,6 +159,8 @@ sh install.sh uninstall
 --tag NAME               ss:// 链接名称
 --tcp-only               只开 TCP
 --udp-only               只开 UDP
+--ipv4-first             域名解析优先 IPv4，默认值，适合大多数 NAT 小鸡
+--ipv6-first             域名解析优先 IPv6
 --no-install-deps        不自动安装缺失依赖
 --no-start               安装后不启动服务
 --force                  覆盖已有配置
@@ -185,6 +193,8 @@ NAT VPS
 - 使用官方 `ssserver`。
 - 默认 TCP + UDP。
 - systemd 或 OpenRC 自动拉起。
+- OpenRC 下优先使用 `supervise-daemon` 监控进程，异常退出会自动拉起。
+- 默认 `ipv6_first=false`，避免无 IPv6 出口的 NAT 小鸡优先访问 IPv6 目标。
 - systemd 下设置 `LimitNOFILE=1048576`。
 - 默认不碰复杂防火墙和系统网络参数，避免破坏 NAT 环境。
 

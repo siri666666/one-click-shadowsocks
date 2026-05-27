@@ -19,7 +19,7 @@ INIT_SYSTEM=""
 
 COMMAND="${1:-install}"
 case "$COMMAND" in
-  install|interactive|update|uninstall|status|link|help|-h|--help) shift || true ;;
+  install|interactive|update|repair|uninstall|status|link|help|-h|--help) shift || true ;;
   *) COMMAND="install" ;;
 esac
 
@@ -30,6 +30,7 @@ EXTERNAL_PORT=""
 PASSWORD=""
 METHOD="2022-blake3-aes-128-gcm"
 MODE="tcp_and_udp"
+IPV6_FIRST=0
 VERSION=""
 TAG="SS-Rust"
 INSTALL_DEPS=1
@@ -62,6 +63,7 @@ Usage:
   sh ss-one.sh install [options]
   sh ss-one.sh interactive
   sh ss-one.sh update [options]
+  sh ss-one.sh repair
   sh ss-one.sh uninstall
   sh ss-one.sh status
   sh ss-one.sh link
@@ -77,6 +79,8 @@ Install options:
   --tag NAME               Display tag in ss:// link. Default: SS-Rust.
   --tcp-only               TCP only.
   --udp-only               UDP only.
+  --ipv6-first             Resolve domain names to IPv6 first.
+  --ipv4-first             Resolve domain names to IPv4 first. Default.
   --no-install-deps        Do not install missing minimal dependencies.
   --no-start               Install but do not start service.
   --force                  Overwrite existing config on install.
@@ -118,6 +122,10 @@ while [ "$#" -gt 0 ]; do
       MODE="tcp_only"; shift ;;
     --udp-only)
       MODE="udp_only"; shift ;;
+    --ipv6-first)
+      IPV6_FIRST=1; shift ;;
+    --ipv4-first)
+      IPV6_FIRST=0; shift ;;
     --no-install-deps)
       INSTALL_DEPS=0; shift ;;
     --install-deps)
@@ -151,6 +159,10 @@ have_busybox_wget() {
 
 have_downloader() {
   have curl || have wget || have_busybox_wget
+}
+
+have_supervise_daemon() {
+  have supervise-daemon || [ -x /sbin/supervise-daemon ] || [ -x /usr/sbin/supervise-daemon ]
 }
 
 have_ca_certificates() {
@@ -335,6 +347,12 @@ cmd_interactive() {
     MODE="tcp_and_udp"
   fi
 
+  if prompt_yes_no "Prefer IPv6 DNS results" "n"; then
+    IPV6_FIRST=1
+  else
+    IPV6_FIRST=0
+  fi
+
   if [ -f "$CONFIG_PATH" ] && prompt_yes_no "Existing config found, overwrite" "n"; then
     FORCE=1
   fi
@@ -436,6 +454,12 @@ write_config() {
   reject_newline "$EXTERNAL_HOST" "external host"
   reject_newline "$TAG" "tag"
 
+  case "$IPV6_FIRST" in
+    0) ipv6_first_json="false" ;;
+    1) ipv6_first_json="true" ;;
+    *) die "invalid ipv6_first value: $IPV6_FIRST" ;;
+  esac
+
   listen_json="$(json_escape "$LISTEN_ADDR")"
   password_json="$(json_escape "$PASSWORD")"
   method_json="$(json_escape "$METHOD")"
@@ -450,7 +474,8 @@ write_config() {
   "method": "${method_json}",
   "timeout": 300,
   "mode": "${mode_json}",
-  "no_delay": true
+  "no_delay": true,
+  "ipv6_first": ${ipv6_first_json}
 }
 EOF
   chmod 0600 "$CONFIG_PATH"
@@ -462,6 +487,7 @@ INTERNAL_PORT=${PORT}
 EXTERNAL_HOST=${EXTERNAL_HOST}
 EXTERNAL_PORT=${EXTERNAL_PORT}
 MODE=${MODE}
+IPV6_FIRST=${IPV6_FIRST}
 TAG=${TAG}
 EOF
   chmod 0600 "$META_PATH"
@@ -494,7 +520,33 @@ EOF
 }
 
 write_openrc_service() {
-  cat > "$OPENRC_SERVICE_PATH" <<EOF
+  if have_supervise_daemon; then
+    cat > "$OPENRC_SERVICE_PATH" <<EOF
+#!/sbin/openrc-run
+
+name="Shadowsocks Rust Server"
+description="Shadowsocks Rust Server"
+command="${BINARY_PATH}"
+command_args="-c ${CONFIG_PATH}"
+supervisor="supervise-daemon"
+respawn_delay=3
+respawn_max=0
+pidfile="${PID_PATH}"
+output_log="${LOG_PATH}"
+error_log="${LOG_PATH}"
+
+depend() {
+  need net
+  after firewall
+}
+
+start_pre() {
+  checkpath -d -m 0755 /run
+  checkpath -f -m 0644 "${LOG_PATH}"
+}
+EOF
+  else
+    cat > "$OPENRC_SERVICE_PATH" <<EOF
 #!/sbin/openrc-run
 
 name="Shadowsocks Rust Server"
@@ -516,6 +568,7 @@ start_pre() {
   checkpath -f -m 0644 "${LOG_PATH}"
 }
 EOF
+  fi
 
   chmod 0755 "$OPENRC_SERVICE_PATH"
   rc-update add "$SERVICE_NAME" default >/dev/null
@@ -615,6 +668,45 @@ link_from_files() {
   printf 'ss://%s@%s:%s#%s\n' "$userinfo" "$host" "$external_port" "$tag64"
 }
 
+load_existing_settings() {
+  [ -f "$CONFIG_PATH" ] || die "config not found: ${CONFIG_PATH}"
+
+  existing_port="$(sed -n 's/.*"server_port"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$CONFIG_PATH" | head -n 1)"
+  existing_password="$(sed -n 's/.*"password"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$CONFIG_PATH" | head -n 1)"
+  existing_method="$(sed -n 's/.*"method"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$CONFIG_PATH" | head -n 1)"
+  existing_mode="$(sed -n 's/.*"mode"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$CONFIG_PATH" | head -n 1)"
+  existing_server="$(sed -n 's/.*"server"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$CONFIG_PATH" | head -n 1)"
+  existing_ipv6_first="$(sed -n 's/.*"ipv6_first"[[:space:]]*:[[:space:]]*\(true\|false\).*/\1/p' "$CONFIG_PATH" | head -n 1)"
+
+  [ -n "$existing_port" ] && PORT="$existing_port"
+  [ -n "$existing_password" ] && PASSWORD="$existing_password"
+  [ -n "$existing_method" ] && METHOD="$existing_method"
+  [ -n "$existing_mode" ] && MODE="$existing_mode"
+  [ -n "$existing_server" ] && LISTEN_ADDR="$existing_server"
+  case "$existing_ipv6_first" in
+    true) IPV6_FIRST=1 ;;
+    false) IPV6_FIRST=0 ;;
+  esac
+
+  saved_host="$(meta_get EXTERNAL_HOST)"
+  saved_external_port="$(meta_get EXTERNAL_PORT)"
+  saved_tag="$(meta_get TAG)"
+  saved_version="$(meta_get VERSION)"
+  saved_ipv6_first="$(meta_get IPV6_FIRST)"
+
+  [ -n "$saved_host" ] && EXTERNAL_HOST="$saved_host"
+  [ -n "$saved_external_port" ] && EXTERNAL_PORT="$saved_external_port"
+  [ -n "$saved_tag" ] && TAG="$saved_tag"
+  [ -n "$saved_version" ] && VERSION="$saved_version"
+  case "$saved_ipv6_first" in
+    0|1) IPV6_FIRST="$saved_ipv6_first" ;;
+  esac
+
+  [ -n "$PORT" ] || die "failed to read server_port from ${CONFIG_PATH}"
+  [ -n "$PASSWORD" ] || die "failed to read password from ${CONFIG_PATH}"
+  [ -n "$METHOD" ] || die "failed to read method from ${CONFIG_PATH}"
+}
+
 print_summary() {
   printf '\n'
   ok "Shadowsocks node is ready"
@@ -677,6 +769,18 @@ cmd_update() {
   self_delete_installer
 }
 
+cmd_repair() {
+  need_root
+  [ -x "$BINARY_PATH" ] || die "binary not found: ${BINARY_PATH}; run install first"
+  load_existing_settings
+  [ -n "$VERSION" ] || VERSION="$("$BINARY_PATH" --version 2>/dev/null | awk '{print $2; exit}' | sed 's/^v//')"
+  [ -n "$VERSION" ] || VERSION="unknown"
+  write_config
+  write_service
+  service_restart
+  print_summary
+}
+
 cmd_uninstall() {
   need_root
   service_stop_disable
@@ -699,6 +803,7 @@ case "$COMMAND" in
   install) cmd_install ;;
   interactive) cmd_interactive ;;
   update) cmd_update ;;
+  repair) cmd_repair ;;
   uninstall) cmd_uninstall ;;
   status) cmd_status ;;
   link) link_from_files ;;
