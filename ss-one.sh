@@ -62,9 +62,9 @@ Usage:
   sh ss-one.sh link
 
 Install options:
-  --port PORT              Internal listen port on this VPS.
-  --external-host HOST     Host/IP used by clients. Default: public IP lookup.
-  --external-port PORT     External NAT port used by clients. Default: --port.
+  --port PORT              Server listen port. Default: random high port.
+  --external-host HOST     Host/IP used in the generated ss:// link. Default: public IP lookup.
+  --external-port PORT     Port used in the generated ss:// link. Default: --port.
   --listen ADDR            Listen address. Default: 0.0.0.0.
   --password PASS          Password/key. Default: secure random value.
   --method METHOD          Cipher. Default: 2022-blake3-aes-128-gcm.
@@ -82,6 +82,11 @@ Examples:
   sh ss-one.sh install
   sh ss-one.sh install --port 12345 --external-host 1.2.3.4 --external-port 45678
   sh ss-one.sh install --method chacha20-ietf-poly1305
+
+NAT note:
+  ssserver only listens on --port. If your provider maps 45678 -> 12345,
+  install with --port 12345 and use --external-port 45678 only to print
+  a ready-to-copy client link.
 EOF
 }
 
@@ -404,8 +409,8 @@ print_summary() {
   ok "Shadowsocks node is ready"
   printf '  Service:       %s\n' "$SERVICE_NAME"
   printf '  Config:        %s\n' "$CONFIG_PATH"
-  printf '  Internal port: %s\n' "$PORT"
-  printf '  External:      %s:%s\n' "$EXTERNAL_HOST" "$EXTERNAL_PORT"
+  printf '  Listen port:   %s\n' "$PORT"
+  printf '  Link endpoint: %s:%s\n' "$EXTERNAL_HOST" "$EXTERNAL_PORT"
   printf '  Method:        %s\n' "$METHOD"
   printf '  Link:          %s\n' "$(link_from_files)"
 }
