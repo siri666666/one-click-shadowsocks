@@ -11,7 +11,11 @@ CONFIG_DIR="/etc/shadowsocks-rust"
 CONFIG_PATH="${CONFIG_DIR}/config.json"
 META_PATH="${CONFIG_DIR}/install.env"
 BINARY_PATH="/usr/local/bin/ssserver"
-SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
+SYSTEMD_SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
+OPENRC_SERVICE_PATH="/etc/init.d/${SERVICE_NAME}"
+PID_PATH="/run/${SERVICE_NAME}.pid"
+LOG_PATH="/var/log/${SERVICE_NAME}.log"
+INIT_SYSTEM=""
 
 COMMAND="${1:-install}"
 case "$COMMAND" in
@@ -182,9 +186,33 @@ install_missing_deps() {
   elif have yum; then
     yum install -y ca-certificates curl tar xz coreutils
   elif have apk; then
-    apk add --no-cache ca-certificates curl tar xz coreutils
+    apk add --no-cache ca-certificates curl tar xz coreutils openrc
   else
     die "no supported package manager found; install curl/wget, tar, xz, sha256sum manually"
+  fi
+}
+
+ensure_init_manager() {
+  if have systemctl && [ -d /run/systemd/system ]; then
+    return 0
+  fi
+  if have rc-service && have rc-update && [ -d /etc/init.d ]; then
+    return 0
+  fi
+  if have apk && [ "$INSTALL_DEPS" = "1" ]; then
+    log "installing OpenRC for Alpine service management"
+    apk add --no-cache openrc
+    return 0
+  fi
+}
+
+detect_init_system() {
+  if have systemctl && [ -d /run/systemd/system ]; then
+    printf '%s\n' "systemd"
+  elif have rc-service && have rc-update && [ -d /etc/init.d ]; then
+    printf '%s\n' "openrc"
+  else
+    die "unsupported init system; this script currently supports systemd and OpenRC"
   fi
 }
 
@@ -279,6 +307,7 @@ trap cleanup_tmp EXIT INT TERM
 
 install_binary() {
   install_missing_deps
+  ensure_init_manager
   [ -n "$VERSION" ] || VERSION="$(latest_version)"
   target="$(detect_target)"
   asset="shadowsocks-v${VERSION}.${target}.tar.xz"
@@ -346,10 +375,8 @@ EOF
   ok "wrote ${CONFIG_PATH}"
 }
 
-write_service() {
-  have systemctl || die "systemd is required for this first version"
-
-  cat > "$SERVICE_PATH" <<EOF
+write_systemd_service() {
+  cat > "$SYSTEMD_SERVICE_PATH" <<EOF
 [Unit]
 Description=Shadowsocks Rust Server
 Documentation=https://github.com/shadowsocks/shadowsocks-rust
@@ -371,6 +398,97 @@ EOF
   systemctl daemon-reload
   systemctl enable "$SERVICE_NAME" >/dev/null
   ok "installed systemd service ${SERVICE_NAME}"
+}
+
+write_openrc_service() {
+  cat > "$OPENRC_SERVICE_PATH" <<EOF
+#!/sbin/openrc-run
+
+name="Shadowsocks Rust Server"
+description="Shadowsocks Rust Server"
+command="${BINARY_PATH}"
+command_args="-c ${CONFIG_PATH}"
+command_background="yes"
+pidfile="${PID_PATH}"
+output_log="${LOG_PATH}"
+error_log="${LOG_PATH}"
+
+depend() {
+  need net
+  after firewall
+}
+
+start_pre() {
+  checkpath -d -m 0755 /run
+  checkpath -f -m 0644 "${LOG_PATH}"
+}
+EOF
+
+  chmod 0755 "$OPENRC_SERVICE_PATH"
+  rc-update add "$SERVICE_NAME" default >/dev/null
+  ok "installed OpenRC service ${SERVICE_NAME}"
+}
+
+write_service() {
+  INIT_SYSTEM="$(detect_init_system)"
+  case "$INIT_SYSTEM" in
+    systemd) write_systemd_service ;;
+    openrc) write_openrc_service ;;
+  esac
+}
+
+service_start() {
+  case "${INIT_SYSTEM:-$(detect_init_system)}" in
+    systemd)
+      systemctl restart "$SERVICE_NAME"
+      systemctl is-active "$SERVICE_NAME" >/dev/null || die "service failed to start; run: journalctl -u ${SERVICE_NAME} -e"
+      ;;
+    openrc)
+      rc-service "$SERVICE_NAME" restart
+      rc-service "$SERVICE_NAME" status >/dev/null || die "service failed to start; run: tail -n 100 ${LOG_PATH}"
+      ;;
+  esac
+}
+
+service_restart() {
+  case "${INIT_SYSTEM:-$(detect_init_system)}" in
+    systemd)
+      systemctl daemon-reload
+      systemctl restart "$SERVICE_NAME"
+      systemctl is-active "$SERVICE_NAME" >/dev/null || die "service failed after update"
+      ;;
+    openrc)
+      rc-service "$SERVICE_NAME" restart
+      rc-service "$SERVICE_NAME" status >/dev/null || die "service failed after update"
+      ;;
+  esac
+}
+
+service_stop_disable() {
+  if have systemctl; then
+    systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
+    systemctl disable "$SERVICE_NAME" >/dev/null 2>&1 || true
+  fi
+  if have rc-service; then
+    rc-service "$SERVICE_NAME" stop >/dev/null 2>&1 || true
+  fi
+  if have rc-update; then
+    rc-update del "$SERVICE_NAME" default >/dev/null 2>&1 || true
+  fi
+}
+
+service_status() {
+  if have systemctl && [ -f "$SYSTEMD_SERVICE_PATH" ]; then
+    systemctl --no-pager status "$SERVICE_NAME" || true
+  elif have rc-service && [ -f "$OPENRC_SERVICE_PATH" ]; then
+    rc-service "$SERVICE_NAME" status || true
+  elif have systemctl; then
+    systemctl --no-pager status "$SERVICE_NAME" || true
+  elif have rc-service; then
+    rc-service "$SERVICE_NAME" status || true
+  else
+    warn "no supported service manager found"
+  fi
 }
 
 base64_url() {
@@ -408,6 +526,7 @@ print_summary() {
   printf '\n'
   ok "Shadowsocks node is ready"
   printf '  Service:       %s\n' "$SERVICE_NAME"
+  printf '  Init system:   %s\n' "${INIT_SYSTEM:-$(detect_init_system)}"
   printf '  Config:        %s\n' "$CONFIG_PATH"
   printf '  Listen port:   %s\n' "$PORT"
   printf '  Link endpoint: %s:%s\n' "$EXTERNAL_HOST" "$EXTERNAL_PORT"
@@ -442,8 +561,7 @@ cmd_install() {
   write_config
   write_service
   if [ "$START_SERVICE" = "1" ]; then
-    systemctl restart "$SERVICE_NAME"
-    systemctl is-active "$SERVICE_NAME" >/dev/null || die "service failed to start; run: journalctl -u ${SERVICE_NAME} -e"
+    service_start
   fi
   print_summary
   self_delete_installer
@@ -457,20 +575,17 @@ cmd_update() {
     tmp_meta="${META_PATH}.tmp"
     sed "s/^VERSION=.*/VERSION=\"${VERSION}\"/" "$META_PATH" > "$tmp_meta" && mv "$tmp_meta" "$META_PATH"
   fi
-  systemctl daemon-reload
-  systemctl restart "$SERVICE_NAME"
-  systemctl is-active "$SERVICE_NAME" >/dev/null || die "service failed after update"
+  service_restart
   ok "updated shadowsocks-rust to v${VERSION}"
   self_delete_installer
 }
 
 cmd_uninstall() {
   need_root
-  if have systemctl; then
-    systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
-    systemctl disable "$SERVICE_NAME" >/dev/null 2>&1 || true
-  fi
-  rm -f "$SERVICE_PATH"
+  service_stop_disable
+  rm -f "$SYSTEMD_SERVICE_PATH"
+  rm -f "$OPENRC_SERVICE_PATH"
+  rm -f "$PID_PATH"
   rm -f "$BINARY_PATH"
   rm -rf "$CONFIG_DIR"
   have systemctl && systemctl daemon-reload || true
@@ -478,11 +593,7 @@ cmd_uninstall() {
 }
 
 cmd_status() {
-  if have systemctl; then
-    systemctl --no-pager status "$SERVICE_NAME" || true
-  else
-    warn "systemctl not found"
-  fi
+  service_status
   [ -x "$BINARY_PATH" ] && "$BINARY_PATH" --version || true
   [ -f "$CONFIG_PATH" ] && printf 'Config: %s\n' "$CONFIG_PATH"
 }

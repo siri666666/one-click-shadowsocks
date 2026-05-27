@@ -13,6 +13,7 @@
 - 下载官方 `.sha256` 并校验二进制包。
 - 不安装 Docker，不安装面板，不常驻管理进程。
 - NAT 友好，服务端只配置监听端口，外部端口只用于生成可直接复制的 `ss://` 链接。
+- 支持 systemd 和 OpenRC，覆盖 Debian/Ubuntu/RHEL 系和 Alpine NAT 小鸡。
 - 默认开启 TCP + UDP，保证节点可用性。
 - 安装脚本默认自删除，减少磁盘占用和残留。
 
@@ -69,6 +70,12 @@ sh ss-one.sh install --port 12345 --external-host 1.2.3.4 --external-port 45678
 /etc/systemd/system/ss-rust.service
 ```
 
+Alpine/OpenRC 上服务文件是：
+
+```text
+/etc/init.d/ss-rust
+```
+
 不会保留安装器、压缩包、临时下载文件、面板或管理守护进程。
 
 ## 常用命令
@@ -77,6 +84,12 @@ sh ss-one.sh install --port 12345 --external-host 1.2.3.4 --external-port 45678
 
 ```sh
 systemctl status ss-rust
+```
+
+Alpine/OpenRC：
+
+```sh
+rc-service ss-rust status
 ```
 
 查看分享链接：
@@ -136,12 +149,23 @@ sh ss-one.sh install --method chacha20-ietf-poly1305
 
 这个脚本按低配 NAT VPS 设计。256 MB 内存、小硬盘机器也能用，因为运行期没有面板、Docker、Python、Node.js 或管理守护进程。
 
+已支持：
+
+```text
+Debian / Ubuntu
+CentOS / Rocky / Alma / Fedora
+Alpine Linux
+KVM VPS
+NAT VPS
+常规 LXC VPS，前提是允许 systemd 或 OpenRC 服务
+```
+
 服务质量相关配置没有为了省资源乱砍：
 
 - 使用官方 `ssserver`。
 - 默认 TCP + UDP。
-- systemd 自动拉起。
-- `LimitNOFILE=1048576`。
+- systemd 或 OpenRC 自动拉起。
+- systemd 下设置 `LimitNOFILE=1048576`。
 - 默认不碰复杂防火墙和系统网络参数，避免破坏 NAT 环境。
 
 ## 安全说明
