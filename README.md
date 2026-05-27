@@ -19,19 +19,41 @@
 
 ## 一键安装
 
-普通 VPS：
+通用安装命令，适合干净系统直接复制：
 
 ```sh
-curl -fsSLO https://raw.githubusercontent.com/siri666666/one-click-shadowsocks/main/ss-one.sh
-sh ss-one.sh install
+URL=https://raw.githubusercontent.com/siri666666/one-click-shadowsocks/main/install.sh
+OUT=/tmp/ss-install.sh
+dl() { command -v wget >/dev/null 2>&1 && wget -O "$OUT" "$URL" && return 0; command -v curl >/dev/null 2>&1 && curl -fsSL -o "$OUT" "$URL" && return 0; command -v busybox >/dev/null 2>&1 && busybox wget --help >/dev/null 2>&1 && busybox wget -O "$OUT" "$URL" && return 0; return 1; }
+deps() { command -v apt-get >/dev/null 2>&1 && apt-get update && apt-get install -y ca-certificates wget && return 0; command -v dnf >/dev/null 2>&1 && dnf install -y ca-certificates wget && return 0; command -v microdnf >/dev/null 2>&1 && microdnf install -y ca-certificates wget && return 0; command -v yum >/dev/null 2>&1 && yum install -y ca-certificates wget && return 0; command -v apk >/dev/null 2>&1 && apk add --no-cache ca-certificates wget && return 0; command -v pacman >/dev/null 2>&1 && pacman -Sy --noconfirm ca-certificates wget && return 0; command -v zypper >/dev/null 2>&1 && zypper --non-interactive install ca-certificates wget && return 0; command -v tdnf >/dev/null 2>&1 && tdnf install -y ca-certificates wget && return 0; return 1; }
+dl || { deps && dl; } || { echo "no downloader or supported package manager found" >&2; exit 1; }
+sh "$OUT" install
 ```
 
 NAT 小鸡：
 
 ```sh
-curl -fsSLO https://raw.githubusercontent.com/siri666666/one-click-shadowsocks/main/ss-one.sh
-sh ss-one.sh install --port 12345
+URL=https://raw.githubusercontent.com/siri666666/one-click-shadowsocks/main/install.sh
+OUT=/tmp/ss-install.sh
+dl() { command -v wget >/dev/null 2>&1 && wget -O "$OUT" "$URL" && return 0; command -v curl >/dev/null 2>&1 && curl -fsSL -o "$OUT" "$URL" && return 0; command -v busybox >/dev/null 2>&1 && busybox wget --help >/dev/null 2>&1 && busybox wget -O "$OUT" "$URL" && return 0; return 1; }
+deps() { command -v apt-get >/dev/null 2>&1 && apt-get update && apt-get install -y ca-certificates wget && return 0; command -v dnf >/dev/null 2>&1 && dnf install -y ca-certificates wget && return 0; command -v microdnf >/dev/null 2>&1 && microdnf install -y ca-certificates wget && return 0; command -v yum >/dev/null 2>&1 && yum install -y ca-certificates wget && return 0; command -v apk >/dev/null 2>&1 && apk add --no-cache ca-certificates wget && return 0; command -v pacman >/dev/null 2>&1 && pacman -Sy --noconfirm ca-certificates wget && return 0; command -v zypper >/dev/null 2>&1 && zypper --non-interactive install ca-certificates wget && return 0; command -v tdnf >/dev/null 2>&1 && tdnf install -y ca-certificates wget && return 0; return 1; }
+dl || { deps && dl; } || { echo "no downloader or supported package manager found" >&2; exit 1; }
+sh "$OUT" install --port 12345
 ```
+
+如果机器已经有 `curl` 或 `wget`，也可以用短命令：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/siri666666/one-click-shadowsocks/main/install.sh | sh -s -- install
+```
+
+如果你已经把 `install.sh` 放到了机器上，直接执行即可，脚本会自动补齐最小依赖：
+
+```sh
+sh install.sh install
+```
+
+说明：上面的通用命令会自动尝试 `wget`、`curl`、BusyBox `wget`，如果都没有，会用系统包管理器安装 `ca-certificates` 和 `wget` 后继续。完全没有下载工具、没有可用包管理器或软件源不可访问的系统，任何远程一键脚本都无法凭空联网下载。
 
 说明：
 
@@ -101,23 +123,23 @@ sh ss-one.sh link
 因为安装器默认会自删除，所以后续查看链接可以重新下载脚本后执行：
 
 ```sh
-curl -fsSLO https://raw.githubusercontent.com/siri666666/one-click-shadowsocks/main/ss-one.sh
-sh ss-one.sh link
-rm -f ss-one.sh
+wget -O install.sh https://raw.githubusercontent.com/siri666666/one-click-shadowsocks/main/install.sh
+sh install.sh link
+rm -f install.sh
 ```
 
 更新到官方最新版：
 
 ```sh
-curl -fsSLO https://raw.githubusercontent.com/siri666666/one-click-shadowsocks/main/ss-one.sh
-sh ss-one.sh update
+wget -O install.sh https://raw.githubusercontent.com/siri666666/one-click-shadowsocks/main/install.sh
+sh install.sh update
 ```
 
 卸载：
 
 ```sh
-curl -fsSLO https://raw.githubusercontent.com/siri666666/one-click-shadowsocks/main/ss-one.sh
-sh ss-one.sh uninstall
+wget -O install.sh https://raw.githubusercontent.com/siri666666/one-click-shadowsocks/main/install.sh
+sh install.sh uninstall
 ```
 
 ## 可选参数
@@ -173,7 +195,7 @@ NAT VPS
 这个脚本会以 root 权限写入 systemd 服务、配置文件和 `/usr/local/bin/ssserver`。建议先下载查看再运行：
 
 ```sh
-curl -fsSLO https://raw.githubusercontent.com/siri666666/one-click-shadowsocks/main/ss-one.sh
+wget -O ss-one.sh https://raw.githubusercontent.com/siri666666/one-click-shadowsocks/main/ss-one.sh
 less ss-one.sh
 sh ss-one.sh install
 ```

@@ -143,12 +143,28 @@ have() {
   command -v "$1" >/dev/null 2>&1
 }
 
+have_busybox_wget() {
+  have busybox && busybox wget --help >/dev/null 2>&1
+}
+
+have_downloader() {
+  have curl || have wget || have_busybox_wget
+}
+
+have_ca_certificates() {
+  [ -s /etc/ssl/certs/ca-certificates.crt ] ||
+    [ -s /etc/ssl/cert.pem ] ||
+    [ -s /etc/pki/tls/certs/ca-bundle.crt ]
+}
+
 fetch_stdout() {
   url="$1"
   if have curl; then
     curl -fsSL --retry 3 "$url"
   elif have wget; then
-    wget -qO- "$url"
+    wget -q -O - "$url"
+  elif have_busybox_wget; then
+    busybox wget -q -O - "$url"
   else
     return 127
   fi
@@ -161,6 +177,8 @@ download() {
     curl -fL --retry 3 -o "$output" "$url"
   elif have wget; then
     wget -O "$output" "$url"
+  elif have_busybox_wget; then
+    busybox wget -O "$output" "$url"
   else
     die "curl or wget is required"
   fi
@@ -168,7 +186,8 @@ download() {
 
 install_missing_deps() {
   missing=""
-  have curl || have wget || missing="${missing} curl"
+  have_downloader || missing="${missing} download-tool"
+  have_ca_certificates || missing="${missing} ca-certificates"
   have tar || missing="${missing} tar"
   have xz || missing="${missing} xz"
   have sha256sum || have shasum || missing="${missing} coreutils"
@@ -180,15 +199,23 @@ install_missing_deps() {
   if have apt-get; then
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
-    apt-get install -y ca-certificates curl tar xz-utils coreutils
+    apt-get install -y ca-certificates wget tar xz-utils coreutils
   elif have dnf; then
-    dnf install -y ca-certificates curl tar xz coreutils
+    dnf install -y ca-certificates wget tar xz coreutils
+  elif have microdnf; then
+    microdnf install -y ca-certificates wget tar xz coreutils
   elif have yum; then
-    yum install -y ca-certificates curl tar xz coreutils
+    yum install -y ca-certificates wget tar xz coreutils
   elif have apk; then
-    apk add --no-cache ca-certificates curl tar xz coreutils openrc
+    apk add --no-cache ca-certificates wget tar xz coreutils openrc
+  elif have pacman; then
+    pacman -Sy --noconfirm ca-certificates wget tar xz coreutils
+  elif have zypper; then
+    zypper --non-interactive install ca-certificates wget tar xz coreutils
+  elif have tdnf; then
+    tdnf install -y ca-certificates wget tar xz coreutils
   else
-    die "no supported package manager found; install curl/wget, tar, xz, sha256sum manually"
+    die "no supported package manager found; install curl/wget, ca-certificates, tar, xz, sha256sum manually"
   fi
 }
 
