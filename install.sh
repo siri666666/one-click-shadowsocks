@@ -72,4 +72,7 @@ if [ ! -s "$SCRIPT_PATH" ]; then
 fi
 
 chmod +x "$SCRIPT_PATH"
+if [ -f "$0" ]; then
+  export BOOTSTRAP_PATH="$0"
+fi
 exec sh "$SCRIPT_PATH" "$@"

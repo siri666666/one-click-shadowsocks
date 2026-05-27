@@ -19,7 +19,7 @@ INIT_SYSTEM=""
 
 COMMAND="${1:-install}"
 case "$COMMAND" in
-  install|update|uninstall|status|link|help|-h|--help) shift || true ;;
+  install|interactive|update|uninstall|status|link|help|-h|--help) shift || true ;;
   *) COMMAND="install" ;;
 esac
 
@@ -60,6 +60,7 @@ One-click Shadowsocks installer for official shadowsocks-rust.
 
 Usage:
   sh ss-one.sh install [options]
+  sh ss-one.sh interactive
   sh ss-one.sh update [options]
   sh ss-one.sh uninstall
   sh ss-one.sh status
@@ -84,6 +85,7 @@ Install options:
 
 Examples:
   sh ss-one.sh install
+  sh ss-one.sh interactive
   sh ss-one.sh install --port 12345 --external-host 1.2.3.4 --external-port 45678
   sh ss-one.sh install --method chacha20-ietf-poly1305
 
@@ -274,6 +276,70 @@ generate_password() {
     *)
       random_b64 24 ;;
   esac
+}
+
+prompt_value() {
+  label="$1"
+  default="$2"
+  printf '%s' "${label}" >&2
+  [ -n "$default" ] && printf ' [%s]' "$default" >&2
+  printf ': ' >&2
+  IFS= read -r value || value=""
+  [ -n "$value" ] || value="$default"
+  printf '%s\n' "$value"
+}
+
+prompt_yes_no() {
+  label="$1"
+  default="$2"
+  while :; do
+    printf '%s [%s]: ' "$label" "$default" >&2
+    IFS= read -r value || value=""
+    [ -n "$value" ] || value="$default"
+    case "$value" in
+      y|Y|yes|YES|Yes) return 0 ;;
+      n|N|no|NO|No) return 1 ;;
+      *) warn "please answer y or n" ;;
+    esac
+  done
+}
+
+cmd_interactive() {
+  [ -t 0 ] || die "interactive mode requires a TTY; download install.sh first, then run: sh install.sh interactive"
+
+  printf '%s\n' "Interactive Shadowsocks installer"
+  port_value="$(prompt_value "Listen port, empty for random" "")"
+  [ -n "$port_value" ] && PORT="$port_value"
+
+  external_host_value="$(prompt_value "External host/IP for ss link, empty for auto-detect" "")"
+  [ -n "$external_host_value" ] && EXTERNAL_HOST="$external_host_value"
+
+  external_port_default="$PORT"
+  external_port_value="$(prompt_value "External port for ss link, empty to use listen port" "$external_port_default")"
+  [ -n "$external_port_value" ] && EXTERNAL_PORT="$external_port_value"
+
+  method_value="$(prompt_value "Cipher method" "$METHOD")"
+  [ -n "$method_value" ] && METHOD="$method_value"
+
+  password_value="$(prompt_value "Password/key, empty for random" "")"
+  [ -n "$password_value" ] && PASSWORD="$password_value"
+
+  tag_value="$(prompt_value "Link tag" "$TAG")"
+  [ -n "$tag_value" ] && TAG="$tag_value"
+
+  if prompt_yes_no "TCP only" "n"; then
+    MODE="tcp_only"
+  elif prompt_yes_no "UDP only" "n"; then
+    MODE="udp_only"
+  else
+    MODE="tcp_and_udp"
+  fi
+
+  if [ -f "$CONFIG_PATH" ] && prompt_yes_no "Existing config found, overwrite" "n"; then
+    FORCE=1
+  fi
+
+  cmd_install
 }
 
 detect_public_host() {
@@ -563,7 +629,7 @@ print_summary() {
 
 self_delete_installer() {
   [ "$SELF_DELETE" = "1" ] || return 0
-  case "$COMMAND" in install|update) ;; *) return 0 ;; esac
+  case "$COMMAND" in install|interactive|update) ;; *) return 0 ;; esac
 
   script="$0"
   [ -f "$script" ] || return 0
@@ -577,6 +643,10 @@ self_delete_installer() {
   fi
 
   rm -f -- "$script" && ok "installer removed: $script"
+
+  if [ -n "${BOOTSTRAP_PATH:-}" ] && [ -f "$BOOTSTRAP_PATH" ]; then
+    rm -f -- "$BOOTSTRAP_PATH" && ok "bootstrap removed: $BOOTSTRAP_PATH"
+  fi
 }
 
 cmd_install() {
@@ -627,6 +697,7 @@ cmd_status() {
 
 case "$COMMAND" in
   install) cmd_install ;;
+  interactive) cmd_interactive ;;
   update) cmd_update ;;
   uninstall) cmd_uninstall ;;
   status) cmd_status ;;
