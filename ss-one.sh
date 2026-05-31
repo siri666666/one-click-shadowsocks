@@ -31,6 +31,9 @@ PASSWORD=""
 METHOD="2022-blake3-aes-128-gcm"
 MODE="tcp_and_udp"
 IPV6_FIRST=0
+DOWNLOAD_IP_VERSION="${DOWNLOAD_IP_VERSION:-auto}"
+DOWNLOAD_CONNECT_TIMEOUT="${DOWNLOAD_CONNECT_TIMEOUT:-15}"
+DOWNLOAD_MAX_TIME="${DOWNLOAD_MAX_TIME:-60}"
 VERSION=""
 TAG="SS-Rust"
 INSTALL_DEPS=1
@@ -81,6 +84,9 @@ Install options:
   --udp-only               UDP only.
   --ipv6-first             Resolve domain names to IPv6 first.
   --ipv4-first             Resolve domain names to IPv4 first. Default.
+  --download-ipv4          Force installer downloads over IPv4.
+  --download-ipv6          Force installer downloads over IPv6.
+  --download-auto          Auto-detect installer download IP version. Default.
   --no-install-deps        Do not install missing minimal dependencies.
   --no-start               Install but do not start service.
   --force                  Overwrite existing config on install.
@@ -126,6 +132,12 @@ while [ "$#" -gt 0 ]; do
       IPV6_FIRST=1; shift ;;
     --ipv4-first)
       IPV6_FIRST=0; shift ;;
+    --download-ipv4)
+      DOWNLOAD_IP_VERSION=4; shift ;;
+    --download-ipv6)
+      DOWNLOAD_IP_VERSION=6; shift ;;
+    --download-auto)
+      DOWNLOAD_IP_VERSION=auto; shift ;;
     --no-install-deps)
       INSTALL_DEPS=0; shift ;;
     --install-deps)
@@ -171,12 +183,93 @@ have_ca_certificates() {
     [ -s /etc/pki/tls/certs/ca-bundle.crt ]
 }
 
+have_ipv6_default_route() {
+  if have ip && ip -6 route show default 2>/dev/null | grep -q .; then
+    return 0
+  fi
+  if have route && route -A inet6 -n 2>/dev/null | awk '($1 == "::/0" || $1 == "default") && $NF != "lo" && $3 !~ /!/ { found = 1 } END { exit found ? 0 : 1 }'; then
+    return 0
+  fi
+  return 1
+}
+
+download_ip_args() {
+  case "$DOWNLOAD_IP_VERSION" in
+    4|ipv4|IPv4) printf '%s\n' "-4" ;;
+    6|ipv6|IPv6) printf '%s\n' "-6" ;;
+    auto|"")
+      if have_ipv6_default_route; then
+        printf '%s\n' "default"
+        printf '%s\n' "-4"
+      else
+        printf '%s\n' "-4"
+      fi ;;
+    *) die "invalid DOWNLOAD_IP_VERSION: $DOWNLOAD_IP_VERSION" ;;
+  esac
+}
+
+fetch_stdout_curl() {
+  url="$1"
+  ip_arg="$2"
+  if [ -n "$ip_arg" ]; then
+    curl "$ip_arg" -fsSL --retry 3 --connect-timeout "$DOWNLOAD_CONNECT_TIMEOUT" --max-time "$DOWNLOAD_MAX_TIME" "$url"
+  else
+    curl -fsSL --retry 3 --connect-timeout "$DOWNLOAD_CONNECT_TIMEOUT" --max-time "$DOWNLOAD_MAX_TIME" "$url"
+  fi
+}
+
+fetch_stdout_wget() {
+  url="$1"
+  ip_arg="$2"
+  if [ -n "$ip_arg" ]; then
+    wget "$ip_arg" -q -T "$DOWNLOAD_CONNECT_TIMEOUT" -t 3 -O - "$url"
+  else
+    wget -q -T "$DOWNLOAD_CONNECT_TIMEOUT" -t 3 -O - "$url"
+  fi
+}
+
+download_curl() {
+  url="$1"
+  output="$2"
+  ip_arg="$3"
+  if [ -n "$ip_arg" ]; then
+    curl "$ip_arg" -fL --retry 3 --connect-timeout "$DOWNLOAD_CONNECT_TIMEOUT" --max-time "$DOWNLOAD_MAX_TIME" -o "$output" "$url"
+  else
+    curl -fL --retry 3 --connect-timeout "$DOWNLOAD_CONNECT_TIMEOUT" --max-time "$DOWNLOAD_MAX_TIME" -o "$output" "$url"
+  fi
+}
+
+download_wget() {
+  url="$1"
+  output="$2"
+  ip_arg="$3"
+  if [ -n "$ip_arg" ]; then
+    wget "$ip_arg" -T "$DOWNLOAD_CONNECT_TIMEOUT" -t 3 -O "$output" "$url"
+  else
+    wget -T "$DOWNLOAD_CONNECT_TIMEOUT" -t 3 -O "$output" "$url"
+  fi
+}
+
 fetch_stdout() {
   url="$1"
   if have curl; then
-    curl -fsSL --retry 3 "$url"
+    last_rc=1
+    for ip_arg in $(download_ip_args); do
+      [ "$ip_arg" = "default" ] && ip_arg=""
+      fetch_stdout_curl "$url" "$ip_arg" && return 0
+      last_rc=$?
+      [ "$DOWNLOAD_IP_VERSION" = "auto" ] && [ "$ip_arg" != "-4" ] && warn "download failed, retrying with IPv4"
+    done
+    return "$last_rc"
   elif have wget; then
-    wget -q -O - "$url"
+    last_rc=1
+    for ip_arg in $(download_ip_args); do
+      [ "$ip_arg" = "default" ] && ip_arg=""
+      fetch_stdout_wget "$url" "$ip_arg" && return 0
+      last_rc=$?
+      [ "$DOWNLOAD_IP_VERSION" = "auto" ] && [ "$ip_arg" != "-4" ] && warn "download failed, retrying with IPv4"
+    done
+    return "$last_rc"
   elif have_busybox_wget; then
     busybox wget -q -O - "$url"
   else
@@ -188,9 +281,25 @@ download() {
   url="$1"
   output="$2"
   if have curl; then
-    curl -fL --retry 3 -o "$output" "$url"
+    last_rc=1
+    for ip_arg in $(download_ip_args); do
+      [ "$ip_arg" = "default" ] && ip_arg=""
+      download_curl "$url" "$output" "$ip_arg" && return 0
+      last_rc=$?
+      rm -f "$output"
+      [ "$DOWNLOAD_IP_VERSION" = "auto" ] && [ "$ip_arg" != "-4" ] && warn "download failed, retrying with IPv4"
+    done
+    return "$last_rc"
   elif have wget; then
-    wget -O "$output" "$url"
+    last_rc=1
+    for ip_arg in $(download_ip_args); do
+      [ "$ip_arg" = "default" ] && ip_arg=""
+      download_wget "$url" "$output" "$ip_arg" && return 0
+      last_rc=$?
+      rm -f "$output"
+      [ "$DOWNLOAD_IP_VERSION" = "auto" ] && [ "$ip_arg" != "-4" ] && warn "download failed, retrying with IPv4"
+    done
+    return "$last_rc"
   elif have_busybox_wget; then
     busybox wget -O "$output" "$url"
   else
@@ -369,9 +478,25 @@ detect_public_host() {
 }
 
 latest_version() {
-  json="$(fetch_stdout "${OFFICIAL_API}/releases/latest" 2>/dev/null || true)"
+  err="${TMPDIR:-/tmp}/ss-one.latest.$$.err"
+  json="$(fetch_stdout "${OFFICIAL_API}/releases/latest" 2>"$err" || true)"
   tag="$(printf '%s\n' "$json" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\{0,1\}\([^"]*\)".*/\1/p' | head -n 1)"
-  [ -n "$tag" ] || die "failed to detect latest shadowsocks-rust version"
+  if [ -z "$tag" ] && [ -s "$err" ]; then
+    warn "GitHub API latest lookup failed:"
+    sed 's/^/[!]   /' "$err" >&2
+  fi
+  rm -f "$err"
+  if [ -z "$tag" ]; then
+    warn "falling back to GitHub releases feed"
+    feed="$(fetch_stdout "https://github.com/${OFFICIAL_REPO}/releases.atom" 2>/dev/null || true)"
+    tag="$(printf '%s\n' "$feed" | sed -n 's/.*<title>[[:space:]]*v\{0,1\}\([0-9][0-9.][^<]*\)[[:space:]]*<\/title>.*/\1/p' | head -n 1)"
+  fi
+  if [ -z "$tag" ]; then
+    warn "falling back to GitHub latest release page"
+    latest_url="$(fetch_stdout "https://github.com/${OFFICIAL_REPO}/releases/latest" 2>/dev/null | sed -n 's/.*releases\/tag\/v\{0,1\}\([0-9][^"?#<]*\).*/\1/p' | head -n 1 || true)"
+    tag="$latest_url"
+  fi
+  [ -n "$tag" ] || die "failed to detect latest shadowsocks-rust version; retry with --version VERSION or --download-ipv4"
   printf '%s\n' "$tag"
 }
 

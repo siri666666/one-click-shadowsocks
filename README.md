@@ -161,6 +161,9 @@ sh install.sh uninstall
 --udp-only               只开 UDP
 --ipv4-first             域名解析优先 IPv4，默认值，适合大多数 NAT 小鸡
 --ipv6-first             域名解析优先 IPv6
+--download-ipv4          安装器下载强制走 IPv4
+--download-ipv6          安装器下载强制走 IPv6
+--download-auto          安装器自动检测下载 IP 版本，默认值；无 IPv6 默认路由时自动走 IPv4
 --no-install-deps        不自动安装缺失依赖
 --no-start               安装后不启动服务
 --force                  覆盖已有配置
