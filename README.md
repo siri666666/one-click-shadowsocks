@@ -20,6 +20,12 @@
 
 ## 安装
 
+（推荐）交互安装，按提示设置端口、密码、外部端口等参数：
+
+```sh
+set -- interactive; URL=https://raw.githubusercontent.com/siri666666/one-click-shadowsocks/main/install.sh; OUT=/tmp/ss-install.sh; dl(){ command -v wget >/dev/null 2>&1 && wget -O "$OUT" "$URL" && return 0; command -v curl >/dev/null 2>&1 && curl -fsSL -o "$OUT" "$URL" && return 0; command -v busybox >/dev/null 2>&1 && busybox wget --help >/dev/null 2>&1 && busybox wget -O "$OUT" "$URL" && return 0; return 1; }; deps(){ command -v apt-get >/dev/null 2>&1 && apt-get update && apt-get install -y ca-certificates wget && return 0; command -v dnf >/dev/null 2>&1 && dnf install -y ca-certificates wget && return 0; command -v microdnf >/dev/null 2>&1 && microdnf install -y ca-certificates wget && return 0; command -v yum >/dev/null 2>&1 && yum install -y ca-certificates wget && return 0; command -v apk >/dev/null 2>&1 && apk add --no-cache ca-certificates wget && return 0; command -v pacman >/dev/null 2>&1 && pacman -Sy --noconfirm ca-certificates wget && return 0; command -v zypper >/dev/null 2>&1 && zypper --non-interactive install ca-certificates wget && return 0; command -v tdnf >/dev/null 2>&1 && tdnf install -y ca-certificates wget && return 0; return 1; }; dl || { deps && dl; } || { echo "no downloader or supported package manager found" >&2; exit 1; }; sh "$OUT" "$@"
+```
+
 一键随机，自动生成端口和密码：
 
 ```sh
@@ -34,11 +40,7 @@ set -- install --port 12345; URL=https://raw.githubusercontent.com/siri666666/on
 
 预设参数可以按需追加，例如 `--password 'your-password'`、`--method chacha20-ietf-poly1305`、`--tag my-ss`、`--external-host 1.2.3.4`、`--external-port 45678`。
 
-交互安装，按提示设置端口、密码、外部端口等参数：
 
-```sh
-set -- interactive; URL=https://raw.githubusercontent.com/siri666666/one-click-shadowsocks/main/install.sh; OUT=/tmp/ss-install.sh; dl(){ command -v wget >/dev/null 2>&1 && wget -O "$OUT" "$URL" && return 0; command -v curl >/dev/null 2>&1 && curl -fsSL -o "$OUT" "$URL" && return 0; command -v busybox >/dev/null 2>&1 && busybox wget --help >/dev/null 2>&1 && busybox wget -O "$OUT" "$URL" && return 0; return 1; }; deps(){ command -v apt-get >/dev/null 2>&1 && apt-get update && apt-get install -y ca-certificates wget && return 0; command -v dnf >/dev/null 2>&1 && dnf install -y ca-certificates wget && return 0; command -v microdnf >/dev/null 2>&1 && microdnf install -y ca-certificates wget && return 0; command -v yum >/dev/null 2>&1 && yum install -y ca-certificates wget && return 0; command -v apk >/dev/null 2>&1 && apk add --no-cache ca-certificates wget && return 0; command -v pacman >/dev/null 2>&1 && pacman -Sy --noconfirm ca-certificates wget && return 0; command -v zypper >/dev/null 2>&1 && zypper --non-interactive install ca-certificates wget && return 0; command -v tdnf >/dev/null 2>&1 && tdnf install -y ca-certificates wget && return 0; return 1; }; dl || { deps && dl; } || { echo "no downloader or supported package manager found" >&2; exit 1; }; sh "$OUT" "$@"
-```
 
 修复已有安装，不改变端口、密码和加密方式：
 
