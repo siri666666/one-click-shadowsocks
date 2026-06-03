@@ -2,11 +2,12 @@
 
 一个轻量的一次性 Shadowsocks 安装器：安装时负责下载、校验、配置和启动官方 `shadowsocks-rust`；安装完成后脚本自动删除，运行期只留下官方 `ssserver`、配置文件和 systemd 服务。
 
-目标是解决两个痛点：
+目标是解决几个痛点：
 
 - 官方项目可信，但手动部署麻烦。
 - 第三方一键脚本方便，但常常残留面板、管理进程或不透明下载源。
-
+- 服务器装好系统后 可能需要先安装bash/curl/wget等依赖才能用其他所谓的“一键”脚本
+  
 本项目的原则：
 
 - 只使用 `github.com/shadowsocks/shadowsocks-rust` 官方 release。
