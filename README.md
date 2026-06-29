@@ -1,6 +1,6 @@
 # 一键shadowsocks脚本
 
-一个轻量的一次性 Shadowsocks 安装器：安装时负责下载、校验、配置和启动官方 `shadowsocks-rust`；安装完成后脚本自动删除，运行期只留下官方 `ssserver`、配置文件和 systemd 服务。
+一个轻量的 Shadowsocks 安装器：安装时负责下载、校验、配置和启动官方 `shadowsocks-rust`；安装完成后安装器自动删除，运行期只留下官方 `ssserver`、配置文件、系统服务和一个 `ss-one` 管理命令。
 
 目标是解决几个痛点：
 
@@ -18,6 +18,7 @@
 - 支持 systemd 和 OpenRC，覆盖 Debian/Ubuntu/RHEL 系和 Alpine NAT 小鸡。
 - 默认开启 TCP + UDP，保证节点可用性。
 - 安装脚本默认自删除，减少磁盘占用和残留。
+- 默认保留 `ss-one` 管理命令，方便后续查看链接、状态、更新、修复和卸载。
 
 ## 安装
 
@@ -95,6 +96,7 @@ sh ss-one.sh install --port 12345 --external-host 1.2.3.4 --external-port 45678
 
 ```text
 /usr/local/bin/ssserver
+/usr/local/bin/ss-one
 /etc/shadowsocks-rust/config.json
 /etc/shadowsocks-rust/install.env
 /etc/systemd/system/ss-rust.service
@@ -110,44 +112,48 @@ Alpine/OpenRC 上服务文件是：
 
 ## 常用命令
 
-查看服务状态：
+安装完成后会保留一个管理命令：
 
 ```sh
-systemctl status ss-rust
+ss-one
 ```
 
-Alpine/OpenRC：
-
-```sh
-rc-service ss-rust status
-```
+直接运行 `ss-one` 会打开交互菜单。也可以使用下面的子命令。
 
 查看分享链接：
 
 ```sh
-sh ss-one.sh link
+ss-one link
 ```
 
-因为安装器默认会自删除，所以后续查看链接可以重新下载脚本后执行：
+查看服务状态：
 
 ```sh
-wget -O install.sh https://raw.githubusercontent.com/siri666666/one-click-shadowsocks/main/install.sh
-sh install.sh link
-rm -f install.sh
+ss-one status
+```
+
+重启服务：
+
+```sh
+ss-one restart
 ```
 
 更新到官方最新版：
 
 ```sh
-wget -O install.sh https://raw.githubusercontent.com/siri666666/one-click-shadowsocks/main/install.sh
-sh install.sh update
+ss-one update
+```
+
+修复服务文件和配置：
+
+```sh
+ss-one repair
 ```
 
 卸载：
 
 ```sh
-wget -O install.sh https://raw.githubusercontent.com/siri666666/one-click-shadowsocks/main/install.sh
-sh install.sh uninstall
+ss-one uninstall
 ```
 
 ## 可选参数
@@ -171,6 +177,8 @@ sh install.sh uninstall
 --no-install-deps        不自动安装缺失依赖
 --no-start               安装后不启动服务
 --force                  覆盖已有配置
+--no-manager             不安装 /usr/local/bin/ss-one 管理命令
+--manager-path PATH      自定义管理命令路径
 --keep-installer         安装后保留脚本
 ```
 

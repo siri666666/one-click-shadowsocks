@@ -7,19 +7,26 @@ OFFICIAL_API="https://api.github.com/repos/${OFFICIAL_REPO}"
 OFFICIAL_RELEASE="https://github.com/${OFFICIAL_REPO}/releases/download"
 
 SERVICE_NAME="ss-rust"
-CONFIG_DIR="/etc/shadowsocks-rust"
-CONFIG_PATH="${CONFIG_DIR}/config.json"
-META_PATH="${CONFIG_DIR}/install.env"
-BINARY_PATH="/usr/local/bin/ssserver"
-SYSTEMD_SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
-OPENRC_SERVICE_PATH="/etc/init.d/${SERVICE_NAME}"
-PID_PATH="/run/${SERVICE_NAME}.pid"
-LOG_PATH="/var/log/${SERVICE_NAME}.log"
+CONFIG_DIR="${CONFIG_DIR:-/etc/shadowsocks-rust}"
+CONFIG_PATH="${CONFIG_PATH:-${CONFIG_DIR}/config.json}"
+META_PATH="${META_PATH:-${CONFIG_DIR}/install.env}"
+BINARY_PATH="${BINARY_PATH:-/usr/local/bin/ssserver}"
+SYSTEMD_SERVICE_PATH="${SYSTEMD_SERVICE_PATH:-/etc/systemd/system/${SERVICE_NAME}.service}"
+OPENRC_SERVICE_PATH="${OPENRC_SERVICE_PATH:-/etc/init.d/${SERVICE_NAME}}"
+PID_PATH="${PID_PATH:-/run/${SERVICE_NAME}.pid}"
+LOG_PATH="${LOG_PATH:-/var/log/${SERVICE_NAME}.log}"
+MANAGER_PATH="${MANAGER_PATH:-/usr/local/bin/ss-one}"
+MANAGER_SCRIPT_URL="${MANAGER_SCRIPT_URL:-https://raw.githubusercontent.com/siri666666/one-click-shadowsocks/main/ss-one.sh}"
 INIT_SYSTEM=""
 
-COMMAND="${1:-install}"
+SCRIPT_NAME="${0##*/}"
+if [ "$#" -eq 0 ] && [ "$SCRIPT_NAME" = "ss-one" ]; then
+  COMMAND="menu"
+else
+  COMMAND="${1:-install}"
+fi
 case "$COMMAND" in
-  install|interactive|update|repair|uninstall|status|link|help|-h|--help) shift || true ;;
+  install|interactive|update|repair|uninstall|status|link|restart|menu|update-manager|help|-h|--help) shift || true ;;
   *) COMMAND="install" ;;
 esac
 
@@ -40,6 +47,7 @@ INSTALL_DEPS=1
 START_SERVICE=1
 FORCE=0
 SELF_DELETE=1
+INSTALL_MANAGER=1
 
 log() { printf '%s\n' "[*] $*"; }
 ok() { printf '%s\n' "[+] $*"; }
@@ -70,6 +78,15 @@ Usage:
   sh ss-one.sh uninstall
   sh ss-one.sh status
   sh ss-one.sh link
+  sh ss-one.sh restart
+  sh ss-one.sh menu
+  sh ss-one.sh update-manager
+
+After install, the same commands are available through:
+  ss-one
+  ss-one link
+  ss-one status
+  ss-one update
 
 Install options:
   --port PORT              Server listen port. Default: random high port.
@@ -90,6 +107,9 @@ Install options:
   --no-install-deps        Do not install missing minimal dependencies.
   --no-start               Install but do not start service.
   --force                  Overwrite existing config on install.
+  --no-manager             Do not install the persistent ss-one manager command.
+  --install-manager        Install/update the persistent ss-one manager command. Default.
+  --manager-path PATH      Manager command path. Default: /usr/local/bin/ss-one.
   --keep-installer         Keep this installer file after install/update.
   --self-delete            Delete this installer after install/update.
 
@@ -146,6 +166,12 @@ while [ "$#" -gt 0 ]; do
       START_SERVICE=0; shift ;;
     --force)
       FORCE=1; shift ;;
+    --no-manager)
+      INSTALL_MANAGER=0; shift ;;
+    --install-manager)
+      INSTALL_MANAGER=1; shift ;;
+    --manager-path)
+      [ "$#" -ge 2 ] || die "$1 requires a value"; MANAGER_PATH="$2"; shift 2 ;;
     --keep-installer)
       SELF_DELETE=0; shift ;;
     --self-delete)
@@ -708,6 +734,42 @@ write_service() {
   esac
 }
 
+install_manager() {
+  [ "$INSTALL_MANAGER" = "1" ] || return 0
+
+  mkdir -p "$(dirname "$MANAGER_PATH")"
+  if [ -f "$0" ] && [ -s "$0" ] && [ "$0" != "$MANAGER_PATH" ]; then
+    cp "$0" "$MANAGER_PATH"
+  elif [ -f "$MANAGER_PATH" ] && [ -s "$MANAGER_PATH" ]; then
+    chmod 0755 "$MANAGER_PATH"
+    ok "manager command kept at ${MANAGER_PATH}"
+    return 0
+  else
+    download "$MANAGER_SCRIPT_URL" "$MANAGER_PATH"
+  fi
+  chmod 0755 "$MANAGER_PATH"
+  ok "installed manager command ${MANAGER_PATH}"
+}
+
+update_manager_from_remote() {
+  need_root
+  mkdir -p "$(dirname "$MANAGER_PATH")"
+  tmp="${MANAGER_PATH}.tmp.$$"
+  download "$MANAGER_SCRIPT_URL" "$tmp" || {
+    rm -f "$tmp"
+    return 1
+  }
+  chmod 0755 "$tmp" || {
+    rm -f "$tmp"
+    return 1
+  }
+  mv "$tmp" "$MANAGER_PATH" || {
+    rm -f "$tmp"
+    return 1
+  }
+  ok "updated manager command ${MANAGER_PATH}"
+}
+
 service_start() {
   case "${INIT_SYSTEM:-$(detect_init_system)}" in
     systemd)
@@ -766,6 +828,15 @@ base64_url() {
   printf '%s' "$1" | base64 | tr -d '\n' | tr '+/' '-_' | sed 's/=*$//'
 }
 
+link_host() {
+  host="$1"
+  case "$host" in
+    \[*\]) printf '%s\n' "$host" ;;
+    *:*) printf '[%s]\n' "$host" ;;
+    *) printf '%s\n' "$host" ;;
+  esac
+}
+
 meta_get() {
   key="$1"
   [ -f "$META_PATH" ] || return 0
@@ -790,7 +861,7 @@ link_from_files() {
   [ -n "$external_port" ] || external_port="$port"
   userinfo="$(base64_url "${method}:${password}")"
   tag64="$(printf '%s' "$tag" | sed 's/[ #?&]/-/g')"
-  printf 'ss://%s@%s:%s#%s\n' "$userinfo" "$host" "$external_port" "$tag64"
+  printf 'ss://%s@%s:%s#%s\n' "$userinfo" "$(link_host "$host")" "$external_port" "$tag64"
 }
 
 load_existing_settings() {
@@ -839,7 +910,7 @@ print_summary() {
   printf '  Init system:   %s\n' "${INIT_SYSTEM:-$(detect_init_system)}"
   printf '  Config:        %s\n' "$CONFIG_PATH"
   printf '  Listen port:   %s\n' "$PORT"
-  printf '  Link endpoint: %s:%s\n' "$EXTERNAL_HOST" "$EXTERNAL_PORT"
+  printf '  Link endpoint: %s:%s\n' "$(link_host "$EXTERNAL_HOST")" "$EXTERNAL_PORT"
   printf '  Method:        %s\n' "$METHOD"
   printf '  Link:          %s\n' "$(link_from_files)"
 }
@@ -850,6 +921,7 @@ self_delete_installer() {
 
   script="$0"
   [ -f "$script" ] || return 0
+  [ "$script" = "$MANAGER_PATH" ] && return 0
   case "$script" in
     */sh|sh|bash|-*) return 0 ;;
   esac
@@ -874,6 +946,7 @@ cmd_install() {
   install_binary
   write_config
   write_service
+  install_manager
   if [ "$START_SERVICE" = "1" ]; then
     service_start
   fi
@@ -890,6 +963,11 @@ cmd_update() {
     sed "s/^VERSION=.*/VERSION=\"${VERSION}\"/" "$META_PATH" > "$tmp_meta" && mv "$tmp_meta" "$META_PATH"
   fi
   service_restart
+  if [ "$0" = "$MANAGER_PATH" ]; then
+    update_manager_from_remote || warn "failed to update manager command ${MANAGER_PATH}"
+  else
+    install_manager
+  fi
   ok "updated shadowsocks-rust to v${VERSION}"
   self_delete_installer
 }
@@ -902,6 +980,7 @@ cmd_repair() {
   [ -n "$VERSION" ] || VERSION="unknown"
   write_config
   write_service
+  install_manager
   service_restart
   print_summary
 }
@@ -913,6 +992,7 @@ cmd_uninstall() {
   rm -f "$OPENRC_SERVICE_PATH"
   rm -f "$PID_PATH"
   rm -f "$BINARY_PATH"
+  rm -f "$MANAGER_PATH"
   rm -rf "$CONFIG_DIR"
   have systemctl && systemctl daemon-reload || true
   ok "uninstalled ${PROJECT_NAME}"
@@ -924,6 +1004,40 @@ cmd_status() {
   [ -f "$CONFIG_PATH" ] && printf 'Config: %s\n' "$CONFIG_PATH"
 }
 
+cmd_restart() {
+  need_root
+  service_restart
+  ok "restarted ${SERVICE_NAME}"
+}
+
+cmd_menu() {
+  [ -t 0 ] || die "menu mode requires a TTY"
+  while :; do
+    printf '\n%s\n' "Shadowsocks manager"
+    printf '%s\n' "1) Show ss:// link"
+    printf '%s\n' "2) Show service status"
+    printf '%s\n' "3) Restart service"
+    printf '%s\n' "4) Update shadowsocks-rust"
+    printf '%s\n' "5) Repair service/config"
+    printf '%s\n' "6) Update manager script"
+    printf '%s\n' "7) Uninstall"
+    printf '%s\n' "0) Exit"
+    printf '%s' "Choose: "
+    IFS= read -r choice || choice=""
+    case "$choice" in
+      1) link_from_files ;;
+      2) cmd_status ;;
+      3) cmd_restart ;;
+      4) cmd_update ;;
+      5) cmd_repair ;;
+      6) update_manager_from_remote ;;
+      7) cmd_uninstall; return 0 ;;
+      0|"") return 0 ;;
+      *) warn "unknown choice: $choice" ;;
+    esac
+  done
+}
+
 case "$COMMAND" in
   install) cmd_install ;;
   interactive) cmd_interactive ;;
@@ -932,6 +1046,9 @@ case "$COMMAND" in
   uninstall) cmd_uninstall ;;
   status) cmd_status ;;
   link) link_from_files ;;
+  restart) cmd_restart ;;
+  menu) cmd_menu ;;
+  update-manager) update_manager_from_remote ;;
   help|-h|--help) usage ;;
 esac
 exit 0
