@@ -576,6 +576,7 @@ verify_sha256() {
 TMP_DIR=""
 cleanup_tmp() {
   [ -n "${TMP_DIR:-}" ] && [ -d "$TMP_DIR" ] && rm -rf "$TMP_DIR"
+  return 0
 }
 trap cleanup_tmp EXIT INT TERM
 
