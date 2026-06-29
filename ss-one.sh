@@ -31,6 +31,7 @@ case "$COMMAND" in
 esac
 
 LISTEN_ADDR="0.0.0.0"
+LISTEN_ADDR_SET=0
 PORT=""
 EXTERNAL_HOST=""
 EXTERNAL_PORT=""
@@ -92,7 +93,7 @@ Install options:
   --port PORT              Server listen port. Default: random high port.
   --external-host HOST     Host/IP used in the generated ss:// link. Default: public IP lookup.
   --external-port PORT     Port used in the generated ss:// link. Default: --port.
-  --listen ADDR            Listen address. Default: 0.0.0.0.
+  --listen ADDR            Listen address. Default: 0.0.0.0, or :: for IPv6 endpoints.
   --password PASS          Password/key. Default: secure random value.
   --method METHOD          Cipher. Default: 2022-blake3-aes-128-gcm.
   --version VERSION        shadowsocks-rust version, for example 1.24.0.
@@ -135,7 +136,7 @@ while [ "$#" -gt 0 ]; do
     --external-port)
       [ "$#" -ge 2 ] || die "$1 requires a value"; EXTERNAL_PORT="$2"; shift 2 ;;
     --listen|--listen-addr)
-      [ "$#" -ge 2 ] || die "$1 requires a value"; LISTEN_ADDR="$2"; shift 2 ;;
+      [ "$#" -ge 2 ] || die "$1 requires a value"; LISTEN_ADDR="$2"; LISTEN_ADDR_SET=1; shift 2 ;;
     --password)
       [ "$#" -ge 2 ] || die "$1 requires a value"; PASSWORD="$2"; shift 2 ;;
     --method)
@@ -231,6 +232,17 @@ download_ip_args() {
         printf '%s\n' "-4"
       fi ;;
     *) die "invalid DOWNLOAD_IP_VERSION: $DOWNLOAD_IP_VERSION" ;;
+  esac
+}
+
+host_is_ipv6() {
+  host="$1"
+  case "$host" in
+    \[*\]) host="${host#\[}"; host="${host%\]}" ;;
+  esac
+  case "$host" in
+    *:*) return 0 ;;
+    *) return 1 ;;
   esac
 }
 
@@ -595,6 +607,9 @@ write_config() {
   [ -n "$EXTERNAL_PORT" ] || EXTERNAL_PORT="$PORT"
   [ -n "$EXTERNAL_HOST" ] || EXTERNAL_HOST="$(detect_public_host)"
   [ -n "$PASSWORD" ] || PASSWORD="$(generate_password)"
+  if [ "$LISTEN_ADDR_SET" = "0" ] && [ "$LISTEN_ADDR" = "0.0.0.0" ] && host_is_ipv6 "$EXTERNAL_HOST"; then
+    LISTEN_ADDR="::"
+  fi
 
   validate_port "$PORT"
   validate_port "$EXTERNAL_PORT"

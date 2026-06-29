@@ -67,6 +67,7 @@ sh install.sh install
 说明：
 
 - `--port` 是服务器上 `ssserver` 实际监听的端口。
+- 如果 `--external-host` 是 IPv6 地址且没有手动指定 `--listen`，脚本会自动监听 `::`，生成的 `ss://` 链接也会使用 `[IPv6]:端口` 格式。
 - 如果服务商做了端口映射，脚本不需要知道外部端口，服务端仍然只监听 `--port`。
 - 客户端里把端口改成服务商给你的外部端口即可。
 - 如果想让脚本输出的 `ss://` 链接直接使用外部端口，可以额外加 `--external-host` 和 `--external-port`。
@@ -162,7 +163,7 @@ ss-one uninstall
 --port PORT              ssserver 实际监听端口
 --external-host HOST     ss:// 链接里显示的公网 IP 或域名
 --external-port PORT     ss:// 链接里显示的端口，不影响服务端监听
---listen ADDR            监听地址，默认 0.0.0.0
+--listen ADDR            监听地址，默认 0.0.0.0；外部地址为 IPv6 时自动使用 ::
 --password PASS          自定义密码/key
 --method METHOD          加密方式，默认 2022-blake3-aes-128-gcm
 --version VERSION        指定 shadowsocks-rust 版本
