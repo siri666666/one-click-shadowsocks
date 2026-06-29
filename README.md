@@ -18,7 +18,8 @@
 - 支持 systemd 和 OpenRC，覆盖 Debian/Ubuntu/RHEL 系和 Alpine NAT 小鸡。
 - 默认开启 TCP + UDP，保证节点可用性。
 - 安装脚本默认自删除，减少磁盘占用和残留。
-- 默认保留 `ss-one` 管理命令，方便后续查看链接、状态、更新、修复和卸载。
+- 默认保留 `ss-one` 管理命令，方便后续查看链接、状态、更新、修复、卸载和管理多节点。
+- 多节点使用一个 `ssserver` 进程监听多个端口，不额外安装面板或管理守护进程。
 
 ## 安装
 
@@ -100,6 +101,7 @@ sh ss-one.sh install --port 12345 --external-host 1.2.3.4 --external-port 45678
 /usr/local/bin/ss-one
 /etc/shadowsocks-rust/config.json
 /etc/shadowsocks-rust/install.env
+/etc/shadowsocks-rust/nodes/*.env
 /etc/systemd/system/ss-rust.service
 ```
 
@@ -125,6 +127,30 @@ ss-one
 
 ```sh
 ss-one link
+```
+
+查看节点列表：
+
+```sh
+ss-one nodes
+```
+
+新增节点：
+
+```sh
+ss-one node-add --port 23456 --tag hk-2
+```
+
+编辑节点：
+
+```sh
+ss-one node-edit --node hk-2 --external-host 1.2.3.4 --external-port 34567
+```
+
+删除节点：
+
+```sh
+ss-one node-delete --node hk-2
 ```
 
 查看服务状态：
